@@ -5,6 +5,7 @@ If you get an error, debug your code and try again.
 Only use the output of your code to answer the question. 
 You might know the answer without running any code, but you should still run the code to get the answer.
 If it does not seem like you can write code to answer the question, just return "I don't know" as the answer.
+You have the module mysql-connector-python installed.
 
 
 Tu riceverai una OpenAPI specification (https://swagger.io/specification/) in formato YAML.
@@ -20,20 +21,32 @@ Se l'OpenAPI spec non contiene esempi genera i dati della request rispettando la
 Fai attenzione che alcune API possono avere come request un body payload, altre non hanno un body payload 
 ma possono avere come dati di input query params o path variable. Osserva l'OpenAPI spec per comprendere cosa l'API richiede
 
-- Per ogni request effettuata crea un report in csv che contiene le seguenti informazioni:
+- Per ogni request effettuata crea un report sul db mysql 8.0.35 che contiene le tabelle request e run_sequence:
 
-- Date: data del test
-- API: dovrebbe contenere il path della risorsa chiamata senza hostname, per esempoi /v1/api/foo 
-- API path: URL completo della request effettuata che include anche possibili query params o path variable.
-- Metodo: HTTP Method della request (GET, POST, PUT, etc)
-- HTTP Code: http code della request (200, 500, 401, etc)
-- Outcome: Guarda l'OpenAPI spec per capire se la response, come il payload body della response o l'http code sono quelli aspettati dalla request che hai usato.
-  Se il comportamento dell'API era quello che ti aspettavi allora salva nel colonna del cvs "OK" altrimenti "FAILED"
-- Request: il body payload della request se presente
-- Response: il body payload della response se presente
 
-Salva il report nella cartella "report" usando il mome api_test_report_<timestamp>.csv dove <timestamp> è il timestamp corrente.
-L'applicazione alla fine della sua esecuzione dovrebbe stampare il nome del file creato
+- run_sequence
+  - id: genera un UUID
+  - date: data di inizio dell'esecuzion dei test -> DATETIME
+
+- request
+    - id: genera un UUID
+    - date: data della request -> DATETIME
+    - api: dovrebbe contenere il path della risorsa chiamata senza hostname, per esempoi /v1/api/foo -> VARCHAR(256)
+    - api_path: URL completo della request effettuata che include anche possibili query params o path variable. -> VARCHAR(512)
+    - method: HTTP Method della request (GET, POST, PUT, etc) -> VARCHAR(10)
+    - http_code: http code della request (200, 500, 401, etc) -> INT
+    - outcome: Guarda l'OpenAPI spec per capire se la response, come il payload body della response o l'http code sono quelli aspettati dalla request che hai usato.
+    Se il comportamento dell'API era quello che ti aspettavi allora salva nel colonna del cvs "OK" altrimenti "FAILED" -> VARCHAR(10)
+    - request: il body payload della request se presente -> JSON
+    - response: il body payload della response se presente -> JSON
+    - run_sequence: è una chiave esterna -> CONSTRAINT `run_sequence_fk` FOREIGN KEY (`run_sequence`) REFERENCES `run_sequence` (`id`)
+
+La variabile di ambiente MYSQL_HOST contiene l'host a mysql compresa la porta per esempio localhost:3306
+La variabile di ambiente MYSQL_SCHEMA contiene il nome dello schema
+La variabile di ambiente MYSQL_USER contiene l'username e MYSQL_PASSWORD contiene la password
+
+
+L'applicazione alla fine della sua esecuzione dovrebbe stampare il numero di righe salvate sulla tabella "request"
 
 Restituisci solo il codice senza alcuna spiegazione.
 
