@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Filtro date ───────────────────────────────────────────────-->
+<form class="row gy-2 align-items-end mb-4" method="get">
+  <div class="col-auto">
+     <label class="form-label">Date from</label>
+     <input type="date" name="date_from" value="{{ date_from }}" class="form-control">
+  </div>
+  <div class="col-auto">
+     <label class="form-label">Date to</label>
+     <input type="date" name="date_to" value="{{ date_to }}" class="form-control">
+  </div>
+  <div class="col-auto">
+     <button class="btn btn-primary">Filtra</button>
+  </div>
+</form>
+
+<!-- Tabella run_sequence ────────────────────────────────────── -->
+<table id="runs-table" class="table table-bordered table-hover">
+  <thead class="table-light">
+      <tr>
+          <th>ID</th>
+          <th>Date</th>
+      </tr>
+  </thead>
+  <tbody>
+    {% for row in sequences %}
+      <tr>
+        <td><a href="{{ url_for('run_details', run_id=row.id) }}">{{ row.id }}</a></td>
+        <td>{{ row.date.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<!-- Upload blocco ───────────────────────────────────────────── -->
+<hr>
+<h5>Load OpenAPI spec for testing</h5>
+<form action="{{ url_for('upload_spec') }}" method="post" enctype="multipart/form-data"
+      class="p-3 border rounded-3">
+    <div class="row g-3 align-items-center">
+        <div class="col">
+            <input class="form-control" type="file" name="spec_file"
+                   accept=".json,.yaml,.yml" required>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-success">Upload</button>
+        </div>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $(function () {
+     $('#runs-table').DataTable({
+         pageLength: 25,
+         order: [[1, 'desc']]
+     });
+  });
+</script>
+{% endblock %}

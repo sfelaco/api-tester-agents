@@ -22,7 +22,7 @@ def should_continue(state: AgentState) -> str:
         state["number_iterations"] = iteration + 1
         return CLIENT_EXECUTOR_TOOL
 
-if __name__ == "__main__":
+def start_agentic_flow(file_path: str):
     flow = StateGraph(AgentState)
     flow.add_node(CLIENT_GENERATOR_AGENT, run_agent_reasoning_engine)
     flow.add_node(CLIENT_EXECUTOR_TOOL, execute_tools)
@@ -37,10 +37,12 @@ if __name__ == "__main__":
     app = flow.compile()
     app.get_graph().draw_mermaid_png(output_file_path="graph.png")
 
-    loader = TextLoader(file_path= "openapi/example.yaml", encoding="utf8")
+    loader = TextLoader(file_path= file_path, encoding="utf8")
     documents = loader.load()
     file_text = documents[0].page_content
 
     res = app.invoke({"input": f" ```{file_text}```"})
-    print(res["agent_outcome"])
-    
+    print(res["agent_outcome"])    
+
+if __name__ == "__main__":
+    start_agentic_flow("openapi/example.yaml")

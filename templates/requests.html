@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<a href="{{ url_for('home') }}" class="btn btn-link mb-3">&larr; Indietro</a>
+
+<h5>Request by run_sequence: <code>{{ seq.id }}</code></h5>
+
+<table id="req-table" class="table table-bordered table-hover">
+  <thead class="table-light">
+     <tr>
+       <th>Date</th>
+       <th>ID</th>
+       <th>api</th>
+       <th>api_path</th>
+       <th>method</th>
+       <th>http_code</th>
+       <th>outcome</th>
+       <th>request_json</th>
+       <th>response_json</th>
+     </tr>
+  </thead>
+  <tbody>
+    {% for r in requests_rows %}
+      <tr>
+        <td>{{ r.date|default("", True)|string|replace("None","") }}</td>
+        <td>{{ r.id }}</td>
+        <td>{{ r.api }}</td>
+        <td>{{ r.api_path }}</td>
+        <td>{{ r.method }}</td>
+        <td>{{ r.http_code }}</td>
+        <td>{{ r.outcome }}</td>
+        <td class="json-cell">
+            <a href="#" class="json‑link"
+               data-kind="request" data-id="{{ r.id }}">
+               {{ (r.request_json|tojson)[:100] if r.request_json is not none else "" }}...
+            </a>
+        </td>
+        <td class="json-cell">
+            <a href="#" class="json‑link"
+               data-kind="response" data-id="{{ r.id }}">
+               {{ (r.response_json|tojson)[:100] if r.response_json is not none else "" }}...
+            </a>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<!-- Modal per JSON intero -->
+<div class="modal fade" id="jsonModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Dettaglio JSON</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <pre id="jsonContent" class="mb-0"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(function () {
+   /* DataTables con colonne ordinabili */
+   $('#req-table').DataTable({
+       pageLength: 50,
+       order: [[0, 'desc']],
+       columnDefs: [
+         { orderable: true,  targets: [0,3,4,6] },
+         { orderable: false, targets: '_all' }
+       ]
+   });
+
+   /* Gestione popup JSON */
+   const modal = new bootstrap.Modal('#jsonModal');
+
+   $('.json‑link').on('click', function (e) {
+       e.preventDefault();
+       const kind = $(this).data('kind');
+       const id   = $(this).data('id');
+       $('#jsonContent').text("loading…");
+
+       $.getJSON(`/request/${id}/json/${kind}`, function (data) {
+            $('#jsonContent').text(JSON.stringify(data, null, 2));
+            modal.show();
+       });
+   });
+});
+</script>
+{% endblock %}
