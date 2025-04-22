@@ -10,8 +10,6 @@ from state import AgentState
 from langchain_experimental.tools import PythonREPLTool
 from langchain_core.prompts import HumanMessagePromptTemplate
 
-
-
 react_prompt = hub.pull("langchain-ai/react-agent-template")
 
 with open("prompts/code_generator.prompt", "r", encoding="utf8") as file:

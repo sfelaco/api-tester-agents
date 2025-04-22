@@ -7,17 +7,19 @@ from node import run_agent_reasoning_engine
 from node import execute_tools
 from langchain_community.document_loaders import TextLoader
 
-
 from consts import CLIENT_EXECUTOR_TOOL, CLIENT_GENERATOR_AGENT
 
 
 load_dotenv()
 
+max_iterations = 3
 
 def should_continue(state: AgentState) -> str:
-    if isinstance(state["agent_outcome"], AgentFinish):
+    iteration = state.get("iteration", 0)
+    if isinstance(state["agent_outcome"], AgentFinish) or iteration >= max_iterations:
         return END
     else:
+        state["number_iterations"] = iteration + 1
         return CLIENT_EXECUTOR_TOOL
 
 if __name__ == "__main__":

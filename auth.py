@@ -4,7 +4,7 @@ import requests
 
 load_dotenv()
 
-def get_bearer_token():
+def get_oauth2_bearer_token():
     
     print("Retrieving bearer token...")
     
@@ -43,11 +43,11 @@ def get_bearer_token():
         else:
             json_data = response.json()
             bearer_token = json_data.get("access_token")
-            return f"Bearer {bearer_token}"
+            return bearer_token
 
 
 if __name__ == "__main__":
-    token = get_bearer_token()
+    token = get_oauth2_bearer_token()
     if token:
         print(token)
     else:

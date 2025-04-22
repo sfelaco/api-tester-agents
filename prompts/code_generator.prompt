@@ -17,6 +17,7 @@ Il codice deve chiamare ogni API seguento questi pass:
 nella OpenAPI specification, la seconda usando dati da te generati che rispettino la specifica, la terza volta inserisci
 dati che non rispettano la specifica per verificare se l'API è in grado di indivudare dati non conformi. 
 Se l'OpenAPI spec non contiene esempi genera i dati della request rispettando la specifica.
+Passa come header "Authorization" il token ottenuto dalla function metodo get_oauth2_bearer_token() ("from auth import get_oauth2_bearer_token").
 
 Fai attenzione che alcune API possono avere come request un body payload, altre non hanno un body payload 
 ma possono avere come dati di input query params o path variable. Osserva l'OpenAPI spec per comprendere cosa l'API richiede
