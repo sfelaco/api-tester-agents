@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import concurrent.futures, uuid, time
 
 from flask import (
     Flask, render_template, request,
@@ -15,6 +16,9 @@ from graph import start_agentic_flow
 # ──────────────────────────────────────────────────────────────────────────────
 
 load_dotenv()
+
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "replace‑me")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
@@ -96,8 +100,8 @@ def run_details(run_id: str):
                            requests_rows=requests_rows)
 
 
-@app.route("/upload-spec", methods=["POST"])
-def upload_spec():
+@app.route("/start_test", methods=["POST"])
+def start_test():
     """Upload di file .json/.yaml; al momento li salviamo e basta."""
     f = request.files.get("spec_file")
     if not f:
@@ -110,12 +114,19 @@ def upload_spec():
         flash("Formato non consentito", "danger")
         return redirect(url_for("home"))
 
-    f.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    f.save(filepath)
     flash("Spec caricato correttamente!", "success")
     # Qui potresti lanciare la tua logica di import/test.
-    return redirect(url_for("home"))
+    
+    #executor.submit(run_spec_tests, filepath)
+    start_agentic_flow(filepath)
+    return {"ok": True}
+    #return redirect(url_for("home"))
 
-
+def run_spec_tests(spec_path: str):
+    with app.app_context():
+        start_agentic_flow(spec_path)
 # ──────────────────────────────────────────────────────────────────────────────
 #  API Json per popup (opzionale, usata da JS per caricare JSON completo)
 # ──────────────────────────────────────────────────────────────────────────────

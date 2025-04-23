@@ -6,8 +6,10 @@ from state import AgentState
 from node import run_agent_reasoning_engine
 from node import execute_tools
 from langchain_community.document_loaders import TextLoader
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage
 
-from consts import CLIENT_EXECUTOR_TOOL, CLIENT_GENERATOR_AGENT
+from consts import CLIENT_EXECUTOR_TOOL, REACT_AGENT, EXECUTOR
 
 
 load_dotenv()
@@ -24,24 +26,31 @@ def should_continue(state: AgentState) -> str:
 
 def start_agentic_flow(file_path: str):
     flow = StateGraph(AgentState)
-    flow.add_node(CLIENT_GENERATOR_AGENT, run_agent_reasoning_engine)
+    flow.set_entry_point(REACT_AGENT)
+    flow.add_node(REACT_AGENT, run_agent_reasoning_engine)
     flow.add_node(CLIENT_EXECUTOR_TOOL, execute_tools)
+    #flow.add_node(EXECUTOR)
 
-    flow.set_entry_point(CLIENT_GENERATOR_AGENT)
+    
     flow.add_conditional_edges(
-        CLIENT_GENERATOR_AGENT,
+        REACT_AGENT,
         should_continue,
     )
-    flow.add_edge(CLIENT_EXECUTOR_TOOL,CLIENT_GENERATOR_AGENT)
+    flow.add_edge(CLIENT_EXECUTOR_TOOL,REACT_AGENT)
 
     app = flow.compile()
-    app.get_graph().draw_mermaid_png(output_file_path="graph.png")
+    #app.get_graph().draw_mermaid_png(output_file_path="graph.png")
 
     loader = TextLoader(file_path= file_path, encoding="utf8")
     documents = loader.load()
     file_text = documents[0].page_content
-
-    res = app.invoke({"input": f" ```{file_text}```"})
+    
+    input = HumanMessage(content=f"""Voglio creare un applicazione di test di queste API: {file_path}, termina quando l'applicazione è funzionante e non ci sono errori.""")
+    
+    # res = app.invoke({"input": prompt.format_messages(message = messages),
+    #                   "file_text": file_text})
+    res = app.invoke({"input": input,
+                      "file_text": file_text})    
     print(res["agent_outcome"])    
 
 if __name__ == "__main__":

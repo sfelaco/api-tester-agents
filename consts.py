@@ -1,2 +1,3 @@
-CLIENT_GENERATOR_AGENT = "client_generator_agent"
+REACT_AGENT = "react_agent"
 CLIENT_EXECUTOR_TOOL = "client_executor_tool"
+EXECUTOR = "executor"

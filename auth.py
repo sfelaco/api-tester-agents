@@ -5,9 +5,6 @@ import requests
 load_dotenv()
 
 def get_oauth2_bearer_token():
-    
-    print("Retrieving bearer token...")
-    
     idm_endpoint = os.environ.get("IDM_URL")
     client_id = os.environ.get("CLIENT_ID")
     client_secret = os.environ.get("CLIENT_SECRET")

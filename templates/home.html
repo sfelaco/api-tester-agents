@@ -37,16 +37,23 @@
 <!-- Upload blocco ───────────────────────────────────────────── -->
 <hr>
 <h5>Load OpenAPI spec for testing</h5>
-<form action="{{ url_for('upload_spec') }}" method="post" enctype="multipart/form-data"
-      class="p-3 border rounded-3">
+ <form id="specForm" class="p-3 border rounded-3" enctype="multipart/form-data" novalidate>
     <div class="row g-3 align-items-center">
         <div class="col">
             <input class="form-control" type="file" name="spec_file"
                    accept=".json,.yaml,.yml" required>
         </div>
         <div class="col-auto">
-            <button class="btn btn-success">Upload</button>
+            <button class="btn btn-success" id="startBtn">Start</button>
         </div>
+
+        <div class="col-auto align-self-center">
+            <!-- Loader nascosto finché non parte il task -->
+            <div id="loader" class="spinner-border text-primary"
+                 role="status" style="display:none;width:1.5rem;height:1.5rem;">
+                <span class="visually-hidden">Loading…</span>
+            </div>
+        
     </div>
 </form>
 {% endblock %}
@@ -58,6 +65,46 @@
          pageLength: 25,
          order: [[1, 'desc']]
      });
+
+     $('#startBtn').on('click', function () {
+      const form  = document.getElementById('specForm');
+      const fileInput = form.querySelector('input[name="spec_file"]');
+      if (!fileInput.files.length) {
+          alert("Seleziona prima un file .json/.yaml");
+          return;
+      }
+
+      const fd = new FormData();
+      fd.append('spec_file', fileInput.files[0]);
+
+      $('#loader').show();
+      $('#startBtn').prop('disabled', true);
+
+      fetch('{{ url_for("start_test") }}', {
+          method: 'POST',
+          body: fd
+      })
+      .then(r => r.json())
+      .then(data => {
+          $('#loader').hide();
+          $('#startBtn').prop('disabled', false);
+
+          if (data.ok) {
+              // appena il task parte con successo
+              // reindirizziamo subito alla pagina dei risultati,
+              // dove intanto l’utente vedrà la tabella vuota che si popolerà
+              window.location.href = '/';
+          } else {
+              alert(data.err || "Errore");
+          }
+      })
+      .catch(() => {
+          $('#loader').hide();
+          $('#startBtn').prop('disabled', false);
+          alert("Errore di rete");
+      });
+  });
+
   });
 </script>
 {% endblock %}
