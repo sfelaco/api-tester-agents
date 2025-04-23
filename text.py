@@ -8,529 +8,696 @@ import mysql.connector
 from auth import get_oauth2_bearer_token
 
 # DB connection
-MYSQL_HOST = os.environ["MYSQL_HOST"]
-if ":" in MYSQL_HOST:
-    MYSQL_HOST, MYSQL_PORT = MYSQL_HOST.split(":")
-    MYSQL_PORT = int(MYSQL_PORT)
-else:
-    MYSQL_PORT = 3306
-MYSQL_SCHEMA = os.environ["MYSQL_SCHEMA"]
-MYSQL_USER = os.environ["MYSQL_USER"]
-MYSQL_PASSWORD = os.environ["MYSQL_PASSWORD"]
+MYSQL_HOST = os.environ['MYSQL_HOST']
+MYSQL_SCHEMA = os.environ['MYSQL_SCHEMA']
+MYSQL_USER = os.environ['MYSQL_USER']
+MYSQL_PASSWORD = os.environ['MYSQL_PASSWORD']
 
-def get_db():
-    return mysql.connector.connect(
-        host=MYSQL_HOST,
-        port=MYSQL_PORT,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_SCHEMA,
-        autocommit=True
+host, port = MYSQL_HOST.split(':')
+port = int(port)
+
+conn = mysql.connector.connect(
+    host=host,
+    port=port,
+    user=MYSQL_USER,
+    password=MYSQL_PASSWORD,
+    database=MYSQL_SCHEMA,
+    autocommit=True
+)
+cursor = conn.cursor()
+
+def ensure_tables():
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS run_sequence (
+        id VARCHAR(36) PRIMARY KEY,
+        date DATETIME
     )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS request (
+        id VARCHAR(36) PRIMARY KEY,
+        date DATETIME,
+        api VARCHAR(256),
+        api_path VARCHAR(512),
+        method VARCHAR(10),
+        http_code INT,
+        outcome VARCHAR(10),
+        request JSON,
+        response JSON,
+        run_sequence VARCHAR(36),
+        CONSTRAINT run_sequence_fk FOREIGN KEY (run_sequence) REFERENCES run_sequence(id)
+    )
+    """)
 
-def insert_run_sequence(db):
-    run_id = str(uuid.uuid4())
-    now = datetime.datetime.now()
-    cursor = db.cursor()
+ensure_tables()
+
+def now():
+    return datetime.datetime.now().replace(microsecond=0)
+
+def insert_run_sequence(run_id, date):
     cursor.execute(
         "INSERT INTO run_sequence (id, date) VALUES (%s, %s)",
-        (run_id, now)
+        (run_id, date)
     )
-    cursor.close()
-    return run_id
 
-def insert_request(db, req):
-    cursor = db.cursor()
+def insert_request(**kwargs):
     cursor.execute(
-        "INSERT INTO request (id, date, api, api_path, method, http_code, outcome, request, response, run_sequence) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        """INSERT INTO request
+        (id, date, api, api_path, method, http_code, outcome, request, response, run_sequence)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
-            req["id"], req["date"], req["api"], req["api_path"], req["method"],
-            req["http_code"], req["outcome"], json.dumps(req["request"]) if req["request"] is not None else None,
-            json.dumps(req["response"]) if req["response"] is not None else None,
-            req["run_sequence"]
+            kwargs['id'],
+            kwargs['date'],
+            kwargs['api'],
+            kwargs['api_path'],
+            kwargs['method'],
+            kwargs['http_code'],
+            kwargs['outcome'],
+            json.dumps(kwargs['request']) if kwargs['request'] is not None else None,
+            json.dumps(kwargs['response']) if kwargs['response'] is not None else None,
+            kwargs['run_sequence']
         )
     )
-    cursor.close()
 
-def get_headers(token, extra=None):
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json"
-    }
+BASE_URL = "https://petstore3.swagger.io/api/v3"
+
+def get_headers(auth=True, extra=None):
+    headers = {}
+    if auth:
+        token = get_oauth2_bearer_token()
+        headers['Authorization'] = f"Bearer {token}"
     if extra:
         headers.update(extra)
     return headers
 
-def get_api_key_headers():
-    # For endpoints requiring api_key, use a dummy value
-    return {"api_key": "test-api-key"}
-
-BASE_URL = "https://petstore3.swagger.io/api/v3"
-
-def now():
-    return datetime.datetime.now()
-
-def make_request(db, run_id, method, api, api_path, url, headers, params=None, data=None, json_data=None, files=None, expected_codes=None, expected_schema=None, req_body=None, test_type="example"):
-    req_id = str(uuid.uuid4())
-    dt = now()
-    try:
-        resp = requests.request(method, url, headers=headers, params=params, data=data, json=json_data, files=files)
+def check_pet_response(resp, expected_code, expected_fields=None):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    if expected_fields:
         try:
-            resp_json = resp.json()
+            data = resp.json()
+            for f in expected_fields:
+                if f not in data:
+                    return "FAILED"
         except Exception:
-            resp_json = None
-        http_code = resp.status_code
-        # Determine outcome
-        outcome = "OK"
-        if expected_codes and http_code not in expected_codes:
-            outcome = "FAILED"
-        # If expected_schema is provided, do a basic check
-        if expected_schema and resp_json is not None and outcome == "OK":
-            if not validate_schema(resp_json, expected_schema):
-                outcome = "FAILED"
-        # For negative test, expect error code
-        if test_type == "invalid" and http_code in (200, 201):
-            outcome = "FAILED"
-    except Exception as e:
-        http_code = 0
-        resp_json = {"error": str(e)}
-        outcome = "FAILED"
-    insert_request(db, {
-        "id": req_id,
-        "date": dt,
-        "api": api,
-        "api_path": api_path,
-        "method": method,
-        "http_code": http_code,
-        "outcome": outcome,
-        "request": req_body,
-        "response": resp_json,
-        "run_sequence": run_id
-    })
+            return "FAILED"
+    return "OK"
 
-def validate_schema(data, schema):
-    # Only basic validation: check required fields and types
-    if not isinstance(schema, dict):
-        return True
-    if "type" in schema:
-        t = schema["type"]
-        if t == "object":
-            if not isinstance(data, dict):
-                return False
-            props = schema.get("properties", {})
-            required = schema.get("required", [])
-            for r in required:
-                if r not in data:
-                    return False
-            for k, v in props.items():
-                if k in data and not validate_schema(data[k], v):
-                    return False
-        elif t == "array":
-            if not isinstance(data, list):
-                return False
-            items = schema.get("items", {})
-            for d in data:
-                if not validate_schema(d, items):
-                    return False
-        elif t == "string":
-            if not isinstance(data, str):
-                return False
-        elif t == "integer":
-            if not isinstance(data, int):
-                return False
-        elif t == "boolean":
-            if not isinstance(data, bool):
-                return False
-    return True
+def check_order_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    return "OK"
 
-# Example data generators
-def example_pet():
-    return {
-        "id": 123456,
-        "name": "doggie",
-        "category": {"id": 1, "name": "Dogs"},
-        "photoUrls": ["https://example.com/photo1.jpg"],
-        "tags": [{"id": 1, "name": "tag1"}],
-        "status": "available"
-    }
+def check_user_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    return "OK"
 
-def valid_pet():
-    return {
-        "id": 654321,
-        "name": "catto",
-        "category": {"id": 2, "name": "Cats"},
-        "photoUrls": ["https://example.com/photo2.jpg"],
-        "tags": [{"id": 2, "name": "tag2"}],
-        "status": "pending"
-    }
+def check_inventory_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    try:
+        data = resp.json()
+        if not isinstance(data, dict):
+            return "FAILED"
+    except Exception:
+        return "FAILED"
+    return "OK"
 
-def invalid_pet():
-    return {
-        "id": "not-an-integer",
-        "name": 123,  # should be string
-        "category": "not-an-object",
-        "photoUrls": "not-a-list",
-        "tags": "not-a-list",
-        "status": "not-a-status"
-    }
+def check_api_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    return "OK"
 
-def example_order():
-    return {
-        "id": 10,
-        "petId": 198772,
-        "quantity": 7,
-        "shipDate": "2024-06-01T12:00:00Z",
-        "status": "approved",
-        "complete": True
-    }
+def check_login_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    return "OK"
 
-def valid_order():
-    return {
-        "id": 11,
-        "petId": 654321,
-        "quantity": 2,
-        "shipDate": "2024-06-02T10:00:00Z",
-        "status": "placed",
-        "complete": False
-    }
+def check_logout_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    return "OK"
 
-def invalid_order():
-    return {
-        "id": "bad",
-        "petId": "bad",
-        "quantity": "bad",
-        "shipDate": "not-a-date",
-        "status": "not-a-status",
-        "complete": "not-a-bool"
-    }
+def check_delete_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    return "OK"
 
-def example_user():
-    return {
-        "id": 10,
-        "username": "theUser",
-        "firstName": "John",
-        "lastName": "James",
-        "email": "john@email.com",
-        "password": "12345",
-        "phone": "12345",
-        "userStatus": 1
-    }
+def check_upload_response(resp, expected_code):
+    if resp.status_code != expected_code:
+        return "FAILED"
+    return "OK"
 
-def valid_user():
-    return {
-        "id": 11,
-        "username": "testuser",
-        "firstName": "Alice",
-        "lastName": "Smith",
-        "email": "alice@example.com",
-        "password": "password",
-        "phone": "555-1234",
-        "userStatus": 2
-    }
+run_id = str(uuid.uuid4())
+insert_run_sequence(run_id, now())
 
-def invalid_user():
-    return {
-        "id": "bad",
-        "username": 123,
-        "firstName": 456,
-        "lastName": 789,
-        "email": 12345,
-        "password": 67890,
-        "phone": 11111,
-        "userStatus": "bad"
-    }
+# --- API TESTS ---
 
-def main():
-    db = get_db()
-    run_id = insert_run_sequence(db)
-    token = get_oauth2_bearer_token()
+# Helper data
+pet_example = {
+    "id": 10,
+    "name": "doggie",
+    "category": {"id": 1, "name": "Dogs"},
+    "photoUrls": ["https://example.com/photo1.jpg"],
+    "tags": [{"id": 1, "name": "tag1"}],
+    "status": "available"
+}
+pet_valid = {
+    "id": 123456,
+    "name": "Fuffy",
+    "category": {"id": 2, "name": "Cats"},
+    "photoUrls": ["https://example.com/cat.jpg"],
+    "tags": [{"id": 2, "name": "cute"}],
+    "status": "pending"
+}
+pet_invalid = {
+    "id": "notanint",
+    "name": 123,
+    "category": "notanobject",
+    "photoUrls": "notalist",
+    "tags": "notalist",
+    "status": "notvalid"
+}
 
-    # 1. /pet POST (addPet)
-    for test_type, pet in [("example", example_pet()), ("valid", valid_pet()), ("invalid", invalid_pet())]:
-        make_request(
-            db, run_id, "POST", "/pet", f"{BASE_URL}/pet", f"{BASE_URL}/pet",
-            get_headers(token, {"Content-Type": "application/json"}),
-            json_data=pet,
-            expected_codes=[200, 201, 422, 400],
-            expected_schema=None,
-            req_body=pet,
-            test_type=test_type
-        )
+order_example = {
+    "id": 10,
+    "petId": 198772,
+    "quantity": 7,
+    "shipDate": "2024-06-01T12:00:00Z",
+    "status": "approved",
+    "complete": True
+}
+order_valid = {
+    "id": 11,
+    "petId": 123456,
+    "quantity": 2,
+    "shipDate": "2024-06-02T10:00:00Z",
+    "status": "placed",
+    "complete": False
+}
+order_invalid = {
+    "id": "badid",
+    "petId": "badpetid",
+    "quantity": "notanint",
+    "shipDate": "notadate",
+    "status": "notvalid",
+    "complete": "notabool"
+}
 
-    # 2. /pet PUT (updatePet)
-    for test_type, pet in [("example", example_pet()), ("valid", valid_pet()), ("invalid", invalid_pet())]:
-        make_request(
-            db, run_id, "PUT", "/pet", f"{BASE_URL}/pet", f"{BASE_URL}/pet",
-            get_headers(token, {"Content-Type": "application/json"}),
-            json_data=pet,
-            expected_codes=[200, 422, 400, 404],
-            expected_schema=None,
-            req_body=pet,
-            test_type=test_type
-        )
+user_example = {
+    "id": 10,
+    "username": "theUser",
+    "firstName": "John",
+    "lastName": "James",
+    "email": "john@email.com",
+    "password": "12345",
+    "phone": "12345",
+    "userStatus": 1
+}
+user_valid = {
+    "id": 20,
+    "username": "testuser",
+    "firstName": "Alice",
+    "lastName": "Smith",
+    "email": "alice@example.com",
+    "password": "password",
+    "phone": "555-1234",
+    "userStatus": 2
+}
+user_invalid = {
+    "id": "badid",
+    "username": 123,
+    "firstName": 456,
+    "lastName": 789,
+    "email": 12345,
+    "password": 67890,
+    "phone": 11111,
+    "userStatus": "notanint"
+}
 
-    # 3. /pet/findByStatus GET
-    for test_type, status in [("example", "available"), ("valid", "pending"), ("invalid", "notastatus")]:
-        params = {"status": status}
-        make_request(
-            db, run_id, "GET", "/pet/findByStatus", f"{BASE_URL}/pet/findByStatus?status={status}", f"{BASE_URL}/pet/findByStatus",
-            get_headers(token),
-            params=params,
-            expected_codes=[200, 400],
-            expected_schema=None,
-            req_body=params,
-            test_type=test_type
-        )
+# 1. /pet POST (addPet)
+for idx, req in enumerate([pet_example, pet_valid, pet_invalid]):
+    url = f"{BASE_URL}/pet"
+    method = "POST"
+    headers = get_headers()
+    data = req
+    resp = requests.post(url, headers=headers, json=data)
+    outcome = "OK" if (idx < 2 and resp.status_code == 200) or (idx == 2 and resp.status_code in (400, 422)) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=data,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 4. /pet/findByTags GET
-    for test_type, tags in [("example", ["tag1"]), ("valid", ["tag2", "tag3"]), ("invalid", [123, None])]:
-        params = {"tags": ",".join([str(t) for t in tags])}
-        make_request(
-            db, run_id, "GET", "/pet/findByTags", f"{BASE_URL}/pet/findByTags?tags={params['tags']}", f"{BASE_URL}/pet/findByTags",
-            get_headers(token),
-            params=params,
-            expected_codes=[200, 400],
-            expected_schema=None,
-            req_body=params,
-            test_type=test_type
-        )
+# 2. /pet PUT (updatePet)
+for idx, req in enumerate([pet_example, pet_valid, pet_invalid]):
+    url = f"{BASE_URL}/pet"
+    method = "PUT"
+    headers = get_headers()
+    data = req
+    resp = requests.put(url, headers=headers, json=data)
+    outcome = "OK" if (idx < 2 and resp.status_code == 200) or (idx == 2 and resp.status_code in (400, 422, 404)) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=data,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 5. /pet/{petId} GET
-    for test_type, petId in [("example", 123456), ("valid", 654321), ("invalid", "badid")]:
-        url = f"{BASE_URL}/pet/{petId}"
-        make_request(
-            db, run_id, "GET", "/pet/{petId}", url, url,
-            get_headers(token),
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body={"petId": petId},
-            test_type=test_type
-        )
+# 3. /pet/findByStatus GET
+for idx, status in enumerate(["available", "pending", "notvalid"]):
+    url = f"{BASE_URL}/pet/findByStatus"
+    method = "GET"
+    headers = get_headers()
+    params = {"status": status}
+    resp = requests.get(url, headers=headers, params=params)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code == 400 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet/findByStatus",
+        api_path=resp.url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=params,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 6. /pet/{petId} POST (updatePetWithForm)
-    for test_type, petId, name, status in [
-        ("example", 123456, "doggie", "available"),
-        ("valid", 654321, "catto", "pending"),
-        ("invalid", "badid", 123, 456)
-    ]:
-        url = f"{BASE_URL}/pet/{petId}"
-        params = {}
-        if name is not None:
-            params["name"] = name
-        if status is not None:
-            params["status"] = status
-        make_request(
-            db, run_id, "POST", "/pet/{petId}", f"{url}?name={name}&status={status}", url,
-            get_headers(token),
-            params=params,
-            expected_codes=[200, 400],
-            expected_schema=None,
-            req_body={"petId": petId, "name": name, "status": status},
-            test_type=test_type
-        )
+# 4. /pet/findByTags GET
+for idx, tags in enumerate([["tag1"], ["cute", "fluffy"], [123, None]]):
+    url = f"{BASE_URL}/pet/findByTags"
+    method = "GET"
+    headers = get_headers()
+    params = {"tags": ",".join([str(t) for t in tags])}
+    resp = requests.get(url, headers=headers, params=params)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code == 400 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet/findByTags",
+        api_path=resp.url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=params,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 7. /pet/{petId} DELETE
-    for test_type, petId in [("example", 123456), ("valid", 654321), ("invalid", "badid")]:
-        url = f"{BASE_URL}/pet/{petId}"
-        make_request(
-            db, run_id, "DELETE", "/pet/{petId}", url, url,
-            get_headers(token),
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body={"petId": petId},
-            test_type=test_type
-        )
+# 5. /pet/{petId} GET
+for idx, petId in enumerate([10, pet_valid["id"], "notanid"]):
+    url = f"{BASE_URL}/pet/{petId}"
+    method = "GET"
+    headers = get_headers()
+    resp = requests.get(url, headers=headers)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet/{petId}",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"petId": petId},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 8. /pet/{petId}/uploadImage POST
-    for test_type, petId, meta, file_content in [
-        ("example", 123456, "A nice photo", b"testimagecontent"),
-        ("valid", 654321, "Another photo", b"anotherimage"),
-        ("invalid", "badid", 123, "notbytes")
-    ]:
-        url = f"{BASE_URL}/pet/{petId}/uploadImage"
-        params = {}
-        if meta is not None:
-            params["additionalMetadata"] = meta
-        files = None
-        data = None
-        if isinstance(file_content, bytes):
-            files = {"file": ("test.jpg", file_content, "application/octet-stream")}
-        else:
-            data = file_content
-        make_request(
-            db, run_id, "POST", "/pet/{petId}/uploadImage", url, url,
-            get_headers(token),
-            params=params,
-            files=files,
-            data=data,
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body={"petId": petId, "additionalMetadata": meta, "file": str(file_content)},
-            test_type=test_type
-        )
+# 6. /pet/{petId} POST (updatePetWithForm)
+for idx, (petId, name, status) in enumerate([
+    (10, "doggie", "available"),
+    (pet_valid["id"], "Fuffy", "pending"),
+    ("notanid", 123, "notvalid")
+]):
+    url = f"{BASE_URL}/pet/{petId}"
+    method = "POST"
+    headers = get_headers()
+    params = {}
+    if name is not None:
+        params["name"] = name
+    if status is not None:
+        params["status"] = status
+    resp = requests.post(url, headers=headers, params=params)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code == 400 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet/{petId}",
+        api_path=resp.url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"petId": petId, "name": name, "status": status},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 9. /store/inventory GET
+# 7. /pet/{petId} DELETE
+for idx, petId in enumerate([10, pet_valid["id"], "notanid"]):
+    url = f"{BASE_URL}/pet/{petId}"
+    method = "DELETE"
+    headers = get_headers()
+    resp = requests.delete(url, headers=headers)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet/{petId}",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"petId": petId},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
+
+# 8. /pet/{petId}/uploadImage POST
+for idx, (petId, meta, filedata) in enumerate([
+    (10, "A dog photo", b"testimagebytes"),
+    (pet_valid["id"], "A cat photo", b"catimagebytes"),
+    ("notanid", 123, None)
+]):
+    url = f"{BASE_URL}/pet/{petId}/uploadImage"
+    method = "POST"
+    headers = get_headers()
+    files = None
+    data = None
+    params = {}
+    if meta is not None:
+        params["additionalMetadata"] = meta
+    if filedata is not None:
+        files = {'file': ('test.jpg', filedata, 'application/octet-stream')}
+    resp = requests.post(url, headers=headers, params=params, files=files)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/pet/{petId}/uploadImage",
+        api_path=resp.url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"petId": petId, "additionalMetadata": meta},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
+
+# 9. /store/inventory GET
+for idx in range(3):
     url = f"{BASE_URL}/store/inventory"
-    for test_type in ["example", "valid", "invalid"]:
-        make_request(
-            db, run_id, "GET", "/store/inventory", url, url,
-            get_headers(token, get_api_key_headers()),
-            expected_codes=[200],
-            expected_schema=None,
-            req_body=None,
-            test_type=test_type
-        )
+    method = "GET"
+    headers = get_headers(auth=False, extra={"api_key": "special-key"})
+    resp = requests.get(url, headers=headers)
+    outcome = "OK" if resp.status_code == 200 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/store/inventory",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=None,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 10. /store/order POST
-    for test_type, order in [("example", example_order()), ("valid", valid_order()), ("invalid", invalid_order())]:
-        make_request(
-            db, run_id, "POST", "/store/order", f"{BASE_URL}/store/order", f"{BASE_URL}/store/order",
-            get_headers(token, {"Content-Type": "application/json"}),
-            json_data=order,
-            expected_codes=[200, 400, 422],
-            expected_schema=None,
-            req_body=order,
-            test_type=test_type
-        )
+# 10. /store/order POST (placeOrder)
+for idx, req in enumerate([order_example, order_valid, order_invalid]):
+    url = f"{BASE_URL}/store/order"
+    method = "POST"
+    headers = get_headers()
+    data = req
+    resp = requests.post(url, headers=headers, json=data)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 422) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/store/order",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=data,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 11. /store/order/{orderId} GET
-    for test_type, orderId in [("example", 10), ("valid", 11), ("invalid", "badid")]:
-        url = f"{BASE_URL}/store/order/{orderId}"
-        make_request(
-            db, run_id, "GET", "/store/order/{orderId}", url, url,
-            get_headers(token),
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body={"orderId": orderId},
-            test_type=test_type
-        )
+# 11. /store/order/{orderId} GET
+for idx, orderId in enumerate([10, order_valid["id"], "notanid"]):
+    url = f"{BASE_URL}/store/order/{orderId}"
+    method = "GET"
+    headers = get_headers()
+    resp = requests.get(url, headers=headers)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/store/order/{orderId}",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"orderId": orderId},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 12. /store/order/{orderId} DELETE
-    for test_type, orderId in [("example", 10), ("valid", 11), ("invalid", 2000)]:
-        url = f"{BASE_URL}/store/order/{orderId}"
-        make_request(
-            db, run_id, "DELETE", "/store/order/{orderId}", url, url,
-            get_headers(token),
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body={"orderId": orderId},
-            test_type=test_type
-        )
+# 12. /store/order/{orderId} DELETE
+for idx, orderId in enumerate([10, order_valid["id"], "notanid"]):
+    url = f"{BASE_URL}/store/order/{orderId}"
+    method = "DELETE"
+    headers = get_headers()
+    resp = requests.delete(url, headers=headers)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/store/order/{orderId}",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"orderId": orderId},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 13. /user POST
-    for test_type, user in [("example", example_user()), ("valid", valid_user()), ("invalid", invalid_user())]:
-        make_request(
-            db, run_id, "POST", "/user", f"{BASE_URL}/user", f"{BASE_URL}/user",
-            get_headers(token, {"Content-Type": "application/json"}),
-            json_data=user,
-            expected_codes=[200],
-            expected_schema=None,
-            req_body=user,
-            test_type=test_type
-        )
+# 13. /user POST (createUser)
+for idx, req in enumerate([user_example, user_valid, user_invalid]):
+    url = f"{BASE_URL}/user"
+    method = "POST"
+    headers = get_headers()
+    data = req
+    resp = requests.post(url, headers=headers, json=data)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code != 200 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/user",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=data,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 14. /user/createWithList POST
-    for test_type, users in [
-        ("example", [example_user()]),
-        ("valid", [valid_user(), example_user()]),
-        ("invalid", [invalid_user(), 123])
-    ]:
-        make_request(
-            db, run_id, "POST", "/user/createWithList", f"{BASE_URL}/user/createWithList", f"{BASE_URL}/user/createWithList",
-            get_headers(token, {"Content-Type": "application/json"}),
-            json_data=users,
-            expected_codes=[200],
-            expected_schema=None,
-            req_body=users,
-            test_type=test_type
-        )
+# 14. /user/createWithList POST
+for idx, req in enumerate([[user_example], [user_valid, user_example], [user_invalid, user_example]]):
+    url = f"{BASE_URL}/user/createWithList"
+    method = "POST"
+    headers = get_headers()
+    data = req
+    resp = requests.post(url, headers=headers, json=data)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code != 200 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/user/createWithList",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=data,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 15. /user/login GET
-    for test_type, username, password in [
-        ("example", "theUser", "12345"),
-        ("valid", "testuser", "password"),
-        ("invalid", "baduser", "badpass")
-    ]:
-        params = {"username": username, "password": password}
-        url = f"{BASE_URL}/user/login?username={username}&password={password}"
-        make_request(
-            db, run_id, "GET", "/user/login", url, url,
-            get_headers(token),
-            params=params,
-            expected_codes=[200, 400],
-            expected_schema=None,
-            req_body=params,
-            test_type=test_type
-        )
+# 15. /user/login GET
+for idx, (username, password) in enumerate([
+    ("theUser", "12345"),
+    ("testuser", "password"),
+    (123, None)
+]):
+    url = f"{BASE_URL}/user/login"
+    method = "GET"
+    headers = get_headers()
+    params = {"username": username, "password": password}
+    resp = requests.get(url, headers=headers, params=params)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code == 400 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/user/login",
+        api_path=resp.url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=params,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 16. /user/logout GET
-    for test_type in ["example", "valid", "invalid"]:
-        url = f"{BASE_URL}/user/logout"
-        make_request(
-            db, run_id, "GET", "/user/logout", url, url,
-            get_headers(token),
-            expected_codes=[200],
-            expected_schema=None,
-            req_body=None,
-            test_type=test_type
-        )
+# 16. /user/logout GET
+for idx in range(3):
+    url = f"{BASE_URL}/user/logout"
+    method = "GET"
+    headers = get_headers()
+    resp = requests.get(url, headers=headers)
+    outcome = "OK" if resp.status_code == 200 else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/user/logout",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=None,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 17. /user/{username} GET
-    for test_type, username in [
-        ("example", "theUser"),
-        ("valid", "testuser"),
-        ("invalid", "baduser")
-    ]:
-        url = f"{BASE_URL}/user/{username}"
-        make_request(
-            db, run_id, "GET", "/user/{username}", url, url,
-            get_headers(token),
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body={"username": username},
-            test_type=test_type
-        )
+# 17. /user/{username} GET
+for idx, username in enumerate(["theUser", "testuser", 123]):
+    url = f"{BASE_URL}/user/{username}"
+    method = "GET"
+    headers = get_headers()
+    resp = requests.get(url, headers=headers)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/user/{username}",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"username": username},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 18. /user/{username} PUT
-    for test_type, username, user in [
-        ("example", "theUser", example_user()),
-        ("valid", "testuser", valid_user()),
-        ("invalid", "baduser", invalid_user())
-    ]:
-        url = f"{BASE_URL}/user/{username}"
-        make_request(
-            db, run_id, "PUT", "/user/{username}", url, url,
-            get_headers(token, {"Content-Type": "application/json"}),
-            json_data=user,
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body=user,
-            test_type=test_type
-        )
+# 18. /user/{username} PUT
+for idx, (username, req) in enumerate([
+    ("theUser", user_example),
+    ("testuser", user_valid),
+    (123, user_invalid)
+]):
+    url = f"{BASE_URL}/user/{username}"
+    method = "PUT"
+    headers = get_headers()
+    data = req
+    resp = requests.put(url, headers=headers, json=data)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/user/{username}",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request=data,
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # 19. /user/{username} DELETE
-    for test_type, username in [
-        ("example", "theUser"),
-        ("valid", "testuser"),
-        ("invalid", "baduser")
-    ]:
-        url = f"{BASE_URL}/user/{username}"
-        make_request(
-            db, run_id, "DELETE", "/user/{username}", url, url,
-            get_headers(token),
-            expected_codes=[200, 400, 404],
-            expected_schema=None,
-            req_body={"username": username},
-            test_type=test_type
-        )
+# 19. /user/{username} DELETE
+for idx, username in enumerate(["theUser", "testuser", 123]):
+    url = f"{BASE_URL}/user/{username}"
+    method = "DELETE"
+    headers = get_headers()
+    resp = requests.delete(url, headers=headers)
+    if idx < 2:
+        outcome = "OK" if resp.status_code == 200 else "FAILED"
+    else:
+        outcome = "OK" if resp.status_code in (400, 404) else "FAILED"
+    insert_request(
+        id=str(uuid.uuid4()),
+        date=now(),
+        api="/user/{username}",
+        api_path=url,
+        method=method,
+        http_code=resp.status_code,
+        outcome=outcome,
+        request={"username": username},
+        response=resp.json() if resp.content else None,
+        run_sequence=run_id
+    )
 
-    # Print number of rows in request table
-    cursor = db.cursor()
-    cursor.execute("SELECT COUNT(*) FROM request")
-    count = cursor.fetchone()[0]
-    print(count)
-    cursor.close()
-    db.close()
-
-if __name__ == "__main__":
-    main()
+# Print number of rows in request table
+cursor.execute("SELECT COUNT(*) FROM request")
+print(cursor.fetchone()[0])

@@ -47,7 +47,7 @@ La variabile di ambiente MYSQL_SCHEMA contiene il nome dello schema
 La variabile di ambiente MYSQL_USER contiene l'username e MYSQL_PASSWORD contiene la password
 
 
-L'applicazione alla fine della sua esecuzione dovrebbe stampare sullo stdout il numero di righe salvate sulla tabella "request"
+L'applicazione alla fine della sua esecuzione dovrebbe stampare sullo stdout il numero dei nuovi record creati nella tabella "request"
 
 Restituisci solo il codice senza alcuna spiegazione.
 

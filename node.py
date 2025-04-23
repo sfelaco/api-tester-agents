@@ -31,11 +31,11 @@ llm = ChatOpenAI(model="gpt-4.1", temperature=0)
     
 @tool 
 def generate_python_code(yaml_file: str) -> str:
-    """Tool for generating python code."""
+    """Tool for generating and correct python code."""
     prompt = ChatPromptTemplate.from_template(template = instructions_template.prompt.template)
     chain = prompt | llm  | StrOutputParser()
     result = chain.invoke(input = {"file_text": yaml_file})
-    return PythonREPLTool().invoke(result)
+    return result
      
 
 
@@ -50,9 +50,14 @@ def run_agent_reasoning_engine(state: AgentState):
 
 
 
-# def run_pythonREPLTool(state: AgentState) {
-#     PythonREPLTool()invoke(state["agent_outcome"])
-# }
+def run_pythonREPLTool(state: AgentState) :
+    print("Running Python REPL Tool")
+    agent_action = state["agent_outcome"]
+    code = state["intermediate_steps"][-1][1]
+    output = PythonREPLTool().invoke(code)
+    
+    return {"intermediate_steps": [(agent_action, str(output))]}
+
 
 def execute_tools(state: AgentState):
     agent_action = state["agent_outcome"]
@@ -81,4 +86,4 @@ def execute_tools(state: AgentState):
 
 
 if __name__ == "__main__":
-    generate_python_code("openapi/example.yaml")
+     ("openapi/example.yaml")
