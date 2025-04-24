@@ -8,7 +8,8 @@ from langchain_core.tools import tool
 from langchain_openai.chat_models import ChatOpenAI
 from state import AgentState
 from langchain_experimental.tools import PythonREPLTool
-from langchain_core.prompts import HumanMessagePromptTemplate, ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_core.output_parsers import StrOutputParser
 
@@ -16,47 +17,28 @@ react_prompt = hub.pull("langchain-ai/react-agent-template")
 
 #react_prompt = hub.pull("hwchase17/react")
 
-with open("prompts/code_generator.prompt", "r", encoding="utf-8") as file:
-    instructions = file.read()
-    
-instructions_template = HumanMessagePromptTemplate.from_template_file("prompts/code_generator.prompt", input_variables=['file_text'])
+
+instructions_template = HumanMessagePromptTemplate.from_template_file("prompts/code_generator.prompt", input_variables=[""])    
+
+prompt = react_prompt.partial(instructions = instructions_template.format().content)
+llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0)
 
 
-prompt = react_prompt.partial(instructions = 
-             """Sei un agent che è genera codice Python per eseguire un client OpenAPI, partendo da una specifica alla quale i tool possono accedere.
-                Dopo aver generato il codice eseguilo e ritorna l'output dell'applicazione, se ci sono errori correggili e riesegui. """)
-#prompt = react_prompt
-llm = ChatOpenAI(model="gpt-4.1", temperature=0)
-"""Tool for running python code in a REPL."""
-    
-@tool 
-def generate_python_code(yaml_file: str) -> str:
-    """Tool for generating and correct python code."""
-    prompt = ChatPromptTemplate.from_template(template = instructions_template.prompt.template)
-    chain = prompt | llm  | StrOutputParser()
-    result = chain.invoke(input = {"file_text": yaml_file})
-    return result
-     
+ 
+generation_prompt = ChatPromptTemplate.from_messages(
+    [
+        SystemMessagePromptTemplate.from_template_file("prompts/system_message.prompt", input_variables=[""]),
+        HumanMessagePromptTemplate(prompt = prompt)
+     ]
+)   
 
-
-tools = [ generate_python_code]
-react_reasoning_runnable = create_react_agent(llm, tools, prompt)
-
+tools = [ PythonREPLTool()]
+react_reasoning_runnable = create_react_agent(llm, tools, generation_prompt)
 
 
 def run_agent_reasoning_engine(state: AgentState):
     agent_outcome = react_reasoning_runnable.invoke(state)
     return {"agent_outcome": agent_outcome}
-
-
-
-def run_pythonREPLTool(state: AgentState) :
-    print("Running Python REPL Tool")
-    agent_action = state["agent_outcome"]
-    code = state["intermediate_steps"][-1][1]
-    output = PythonREPLTool().invoke(code)
-    
-    return {"intermediate_steps": [(agent_action, str(output))]}
 
 
 def execute_tools(state: AgentState):
@@ -82,7 +64,10 @@ def execute_tools(state: AgentState):
     else:
         output = f"Error: Tool '{tool_name}' not found"
     
-    return {"intermediate_steps": [(agent_action, str(output))]}
+    iteration = state.get("number_iterations", 0)
+    
+    return {"intermediate_steps": [(agent_action, str(output))],
+            "number_iterations": iteration+1}
 
 
 if __name__ == "__main__":

@@ -1,56 +1,50 @@
-You are an agent designed to write and execute python code to answer questions.
-Generate a code that can be executed with python REPL
-If you get an error, debug your code and try again.
-Only use the output of your code to answer the question. 
-You might know the answer without running any code, but you should still run the code to get the answer.
-If it does not seem like you can write code to answer the question, just return "I don't know" as the answer.
-You have the module mysql-connector-python installed.
-
-
-Tu riceverai una OpenAPI specification (https://swagger.io/specification/) in formato YAML.
-Scrivi un codice Python che sia in grado di chiamare le API documentate nella specifica. 
-
-Il codice deve chiamare ogni API seguento questi pass:
-
-- Il codice chiama tre volte ogni ogni API: la prima chiamata deve essere eseguita usando una request di esempio contenuti 
-nella OpenAPI specification, la seconda usando dati da te generati che rispettino la specifica, la terza volta inserisci
-dati che non rispettano la specifica per verificare se l'API è in grado di indivudare dati non conformi. 
-Se l'OpenAPI spec non contiene esempi genera i dati della request rispettando la specifica.
-Passa come header "Authorization" il token ottenuto dalla function metodo get_oauth2_bearer_token() ("from auth import get_oauth2_bearer_token").
-
-Fai attenzione che alcune API possono avere come request un body payload, altre non hanno un body payload 
-ma possono avere come dati di input query params o path variable. Osserva l'OpenAPI spec per comprendere cosa l'API richiede
-
-- Per ogni request effettuata crea un report sul db mysql 8.0.35 che contiene le tabelle request e run_sequence:
-
-
-- run_sequence
-  - id: genera un UUID
-  - date: data di inizio dell'esecuzion dei test -> DATETIME
-
-- request
-    - id: genera un UUID
-    - date: data della request -> DATETIME
-    - api: dovrebbe contenere il path della risorsa chiamata senza hostname, per esempoi /v1/api/foo -> VARCHAR(256)
-    - api_path: URL completo della request effettuata che include anche possibili query params o path variable. -> VARCHAR(512)
-    - method: HTTP Method della request (GET, POST, PUT, etc) -> VARCHAR(10)
-    - http_code: http code della request (200, 500, 401, etc) -> INT
-    - outcome: Guarda l'OpenAPI spec per capire se la response, come il payload body della response o l'http code sono quelli aspettati dalla request che hai usato.
-    Se il comportamento dell'API era quello che ti aspettavi allora salva nel colonna del cvs "OK" altrimenti "FAILED" -> VARCHAR(10)
-    - request: il body payload della request se presente -> JSON
-    - response: il body payload della response se presente -> JSON
-    - run_sequence: è una chiave esterna -> CONSTRAINT `run_sequence_fk` FOREIGN KEY (`run_sequence`) REFERENCES `run_sequence` (`id`)
-
-L'applicazione usa queste variabili di ambiente per accedere al DB. Non modificarle sono già valorizzate nell'ambiente dove viene eseguito l'applicativo.
-La variabile di ambiente MYSQL_HOST contiene l'host a mysql compresa la porta per esempio localhost:3306. 
-La variabile di ambiente MYSQL_SCHEMA contiene il nome dello schema
-La variabile di ambiente MYSQL_USER contiene l'username e MYSQL_PASSWORD contiene la password
-
-
-L'applicazione alla fine della sua esecuzione dovrebbe stampare sullo stdout il numero dei nuovi record creati nella tabella "request"
-
-Restituisci solo il codice senza alcuna spiegazione.
-
-```{file_text}```
-
-
+You are an agent designed to write and execute python code to answer questions. 
+Generate a code that can be executed with python REPL 
+If you get an error, debug your code and try again. 
+Only use the output of your code to answer the question.  
+You might know the answer without running any code, but you should still run the code to get the answer. 
+If it does not seem like you can write code to answer the question, just return "I don't know" as the answer. 
+You have the module mysql-connector-python installed. 
+ 
+Scrivi un codice Python che sia in grado di chiamare le API documentate nella specifica OpenAPI (https://swagger.io/specification/) in formato YAML. 
+ 
+Il codice deve chiamare TUTTE le API seguendo questi passi: 
+ 
+- Il codice chiama tre volte ogni ogni API: la prima chiamata deve essere eseguita usando una request di esempio contenuti  
+nella OpenAPI specification, la seconda usando dati da te generati che rispettino la specifica, la terza volta inserisci 
+dati che non rispettano la specifica per verificare se l'API è in grado di indivudare dati non conformi.  
+Se l'OpenAPI spec non contiene esempi genera i dati della request rispettando la specifica. 
+Passa come header "Authorization" il token ottenuto dalla function metodo get_oauth2_bearer_token() ("from auth import get_oauth2_bearer_token"). 
+ 
+Fai attenzione che alcune API possono avere come request un body payload, altre non hanno un body payload  
+ma possono avere come dati di input query params o path variable. Osserva l'OpenAPI spec per comprendere cosa l'API richiede 
+ 
+- Per ogni request effettuata crea un report sul db mysql 8.0.35 che contiene le tabelle request e run_sequence: 
+ 
+ 
+- run_sequence 
+  - id: genera un UUID 
+  - date: data di inizio dell'esecuzion dei test -> DATETIME 
+ 
+- request 
+    - id: genera un UUID 
+    - date: data della request -> DATETIME 
+    - api: dovrebbe contenere il path della risorsa chiamata senza hostname, per esempoi /v1/api/foo -> VARCHAR(256) 
+    - api_path: URL completo della request effettuata che include anche possibili query params o path variable. -> VARCHAR(512) 
+    - method: HTTP Method della request (GET, POST, PUT, etc) -> VARCHAR(10) 
+    - http_code: http code della request (200, 500, 401, etc) -> INT 
+    - outcome: Guarda l'OpenAPI spec per capire se la response, come il payload body della response o l'http code sono quelli aspettati dalla request che hai usato. 
+    Se il comportamento dell'API era quello che ti aspettavi allora salva nel colonna del cvs "OK" altrimenti "FAILED" -> VARCHAR(10) 
+    - request: il body payload della request se presente -> JSON 
+    - response: il body payload della response se presente -> JSON 
+    - run_sequence: è una chiave esterna -> CONSTRAINT `run_sequence_fk` FOREIGN KEY (`run_sequence`) REFERENCES `run_sequence` (`id`) 
+ 
+L'applicazione usa queste variabili di ambiente per accedere al DB. Non modificarle sono già valorizzate nell'ambiente dove viene eseguito l'applicativo. 
+La variabile di ambiente MYSQL_HOST contiene l'host a mysql compresa la porta per esempio localhost:3306.  
+La variabile di ambiente MYSQL_SCHEMA contiene il nome dello schema 
+La variabile di ambiente MYSQL_USER contiene l'username e MYSQL_PASSWORD contiene la password 
+ 
+ 
+L'applicazione alla fine della sua esecuzione dovrebbe stampare sullo stdout il numero dei nuovi record creati nella tabella "request" 
+ 
+Restituisci solo il codice senza alcuna spiegazione. 
